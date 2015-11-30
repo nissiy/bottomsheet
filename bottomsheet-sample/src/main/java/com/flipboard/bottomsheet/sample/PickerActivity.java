@@ -40,14 +40,14 @@ public class PickerActivity extends AppCompatActivity {
                 InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
                 imm.hideSoftInputFromWindow(shareText.getWindowToken(), 0);
 
-                Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                final Intent shareIntent = new Intent(Intent.ACTION_SEND);
                 shareIntent.putExtra(Intent.EXTRA_TEXT, shareText.getText().toString());
                 shareIntent.setType("text/plain");
                 IntentPickerSheetView intentPickerSheet = new IntentPickerSheetView(PickerActivity.this, shareIntent, "Share with...", new IntentPickerSheetView.OnIntentPickedListener() {
                     @Override
-                    public void onIntentPicked(Intent intent) {
+                    public void onIntentPicked(IntentPickerSheetView.ActivityInfo activityInfo) {
                         bottomSheetLayout.dismissSheet();
-                        startActivity(intent);
+                        startActivity(activityInfo.getConcreteIntent(shareIntent));
                     }
                 });
                 // Filter out built in sharing options such as bluetooth and beam.
@@ -67,7 +67,7 @@ public class PickerActivity extends AppCompatActivity {
 
                 // Add custom mixin example
                 Drawable customDrawable = ResourcesCompat.getDrawable(getResources(), R.mipmap.ic_launcher, null);
-                IntentPickerSheetView.ActivityInfo customInfo = new IntentPickerSheetView.ActivityInfo(customDrawable, "Custom mix-in", MainActivity.class);
+                IntentPickerSheetView.ActivityInfo customInfo = new IntentPickerSheetView.ActivityInfo(customDrawable, "Custom mix-in", PickerActivity.this, MainActivity.class);
                 intentPickerSheet.setMixins(Collections.singletonList(customInfo));
 
                 bottomSheetLayout.showWithSheetView(intentPickerSheet);

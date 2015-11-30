@@ -59,6 +59,8 @@ public class MenuSheetView extends FrameLayout {
     private Adapter adapter;
     private AbsListView absListView;
     private final TextView titleView;
+    protected final int originalListPaddingTop;
+    private int columnWidthDp = 100;
 
     /**
      * @param context Context to construct the view with
@@ -97,6 +99,7 @@ public class MenuSheetView extends FrameLayout {
 
         // Set up the title
         titleView = (TextView) findViewById(R.id.title);
+        originalListPaddingTop = absListView.getPaddingTop();
         setTitle(title);
 
         ViewCompat.setElevation(this, Util.dp2px(getContext(), 16f));
@@ -124,23 +127,13 @@ public class MenuSheetView extends FrameLayout {
     }
 
     @Override
-    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-        super.onLayout(changed, left, top, right, bottom);
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         if (menuType == GRID) {
+            int width = MeasureSpec.getSize(widthMeasureSpec);
             final float density = getResources().getDisplayMetrics().density;
-            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.JELLY_BEAN_MR1) {
-                ((GridView) absListView).setNumColumns((int) (getWidth() / (100 * density)));
-            } else {
-                // On Jelly Bean and below setNumColumns does not redraw the view if we call it during
-                // a layout pass. We must post setting the number of columns to avoid this.
-                post(new Runnable() {
-                    @Override
-                    public void run() {
-                        ((GridView) absListView).setNumColumns((int) (getWidth() / (100 * density)));
-                    }
-                });
-            }
+            ((GridView) absListView).setNumColumns((int) (width / (columnWidthDp * density)));
         }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
     }
 
     @Override
@@ -248,8 +241,15 @@ public class MenuSheetView extends FrameLayout {
             titleView.setVisibility(GONE);
 
             // Add some padding to the top to account for the missing title
-            absListView.setPadding(absListView.getPaddingLeft(), absListView.getPaddingTop() + Util.dp2px(getContext(), 8f), absListView.getPaddingRight(), absListView.getPaddingBottom());
+            absListView.setPadding(absListView.getPaddingLeft(), originalListPaddingTop + Util.dp2px(getContext(), 8f), absListView.getPaddingRight(), absListView.getPaddingBottom());
         }
+    }
+
+    /**
+     * Only applies to GRID
+     */
+    public void setColumnWidthDp(int columnWidthDp) {
+        this.columnWidthDp = columnWidthDp;
     }
 
     /**

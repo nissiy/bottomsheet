@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.drawable.Drawable;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.support.annotation.NonNull;
 import android.support.annotation.StringRes;
@@ -31,12 +32,14 @@ import flipboard.bottomsheet.commons.R;
 @SuppressLint("ViewConstructor")
 public class IntentPickerSheetView extends FrameLayout {
 
+    private int columnWidthDp = 100;
+
     public interface Filter {
         boolean include(ActivityInfo info);
     }
 
     public interface OnIntentPickedListener {
-        void onIntentPicked(Intent intent);
+        void onIntentPicked(ActivityInfo activityInfo);
     }
 
     private class SortAlphabetically implements Comparator<ActivityInfo> {
@@ -53,34 +56,55 @@ public class IntentPickerSheetView extends FrameLayout {
         }
     }
 
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        for (ActivityInfo activityInfo : adapter.activityInfos) {
+            if (activityInfo.iconLoadTask != null) {
+                activityInfo.iconLoadTask.cancel(true);
+                activityInfo.iconLoadTask = null;
+            }
+        }
+    }
+
     /**
      * Represents an item in the picker grid
      */
     public static class ActivityInfo {
-        public final Drawable icon;
+        public Drawable icon;
         public final String label;
         public final ComponentName componentName;
+        public final ResolveInfo resolveInfo;
+        private AsyncTask<Void, Void, Drawable> iconLoadTask;
+        public Object tag;
 
-        public ActivityInfo(Drawable icon, String label, Class<?> clazz) {
+        public ActivityInfo(Drawable icon, String label, Context context, Class<?> clazz) {
             this.icon = icon;
+            resolveInfo = null;
             this.label = label;
-            this.componentName = new ComponentName(clazz.getPackage().getName(), clazz.getName());
+            this.componentName = new ComponentName(context, clazz.getName());
         }
 
-        ActivityInfo(Drawable icon, CharSequence label, ComponentName componentName) {
-            this.icon = icon;
+        ActivityInfo(ResolveInfo resolveInfo, CharSequence label, ComponentName componentName) {
+            this.resolveInfo = resolveInfo;
             this.label = label.toString();
             this.componentName = componentName;
         }
+
+        public Intent getConcreteIntent(Intent intent) {
+            Intent concreteIntent = new Intent(intent);
+            concreteIntent.setComponent(componentName);
+            return concreteIntent;
+        }
     }
 
-    private final Intent intent;
-    private final GridView appGrid;
-    private final List<ActivityInfo> mixins = new ArrayList<>();
+    protected final Intent intent;
+    protected final GridView appGrid;
+    protected final List<ActivityInfo> mixins = new ArrayList<>();
 
-    private Adapter adapter;
-    private Filter filter = new FilterNone();
-    private Comparator<ActivityInfo> sortMethod = new SortAlphabetically();
+    protected Adapter adapter;
+    protected Filter filter = new FilterNone();
+    protected Comparator<ActivityInfo> sortMethod = new SortAlphabetically();
 
     public IntentPickerSheetView(Context context, Intent intent, @StringRes int titleRes, OnIntentPickedListener listener) {
         this(context, intent, context.getString(titleRes), listener);
@@ -98,9 +122,7 @@ public class IntentPickerSheetView extends FrameLayout {
         appGrid.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                Intent concreteIntent = new Intent(intent);
-                concreteIntent.setComponent(adapter.getItem(position).componentName);
-                listener.onIntentPicked(concreteIntent);
+                listener.onIntentPicked(adapter.getItem(position));
             }
         });
 
@@ -113,6 +135,10 @@ public class IntentPickerSheetView extends FrameLayout {
 
     public void setFilter(Filter filter) {
         this.filter = filter;
+    }
+    
+    public void setColumnWidthDp(int columnWidthDp) {
+        this.columnWidthDp = columnWidthDp;
     }
 
     /**
@@ -137,21 +163,12 @@ public class IntentPickerSheetView extends FrameLayout {
     }
 
     @Override
-    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-        super.onLayout(changed, left, top, right, bottom);
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        int width = MeasureSpec.getSize(widthMeasureSpec);
         final float density = getResources().getDisplayMetrics().density;
-        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            appGrid.setNumColumns((int) (getWidth() / (100 * density)));
-        } else {
-            // On Jelly Bean and below setNumColumns does not redraw the view if we call it during
-            // a layout pass. We must post setting the number of columns to avoid this.
-            post(new Runnable() {
-                @Override
-                public void run() {
-                    appGrid.setNumColumns((int) (getWidth() / (100 * density)));
-                }
-            });
-        }
+        getResources().getDimensionPixelSize(R.dimen.bottomsheet_default_sheet_width);
+        appGrid.setNumColumns((int) (width / (columnWidthDp * density)));
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
     }
 
     @Override
@@ -166,16 +183,17 @@ public class IntentPickerSheetView extends FrameLayout {
 
         final List<ActivityInfo> activityInfos;
         final LayoutInflater inflater;
+        private PackageManager packageManager;
 
         public Adapter(Context context, Intent intent, List<ActivityInfo> mixins) {
             inflater = LayoutInflater.from(context);
-            PackageManager pm = context.getPackageManager();
-            List<ResolveInfo> infos = pm.queryIntentActivities(intent, 0);
+            packageManager = context.getPackageManager();
+            List<ResolveInfo> infos = packageManager.queryIntentActivities(intent, 0);
             activityInfos = new ArrayList<>(infos.size() + mixins.size());
             activityInfos.addAll(mixins);
             for (ResolveInfo info : infos) {
                 ComponentName componentName = new ComponentName(info.activityInfo.packageName, info.activityInfo.name);
-                ActivityInfo activityInfo = new ActivityInfo(info.loadIcon(pm), info.loadLabel(pm), componentName);
+                ActivityInfo activityInfo = new ActivityInfo(info, info.loadLabel(packageManager), componentName);
                 if (filter.include(activityInfo)) {
                     activityInfos.add(activityInfo);
                 }
@@ -200,7 +218,7 @@ public class IntentPickerSheetView extends FrameLayout {
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
-            ViewHolder holder;
+            final ViewHolder holder;
 
             if (convertView == null) {
                 convertView = inflater.inflate(R.layout.sheet_grid_item, parent, false);
@@ -210,8 +228,30 @@ public class IntentPickerSheetView extends FrameLayout {
                 holder = (ViewHolder) convertView.getTag();
             }
 
-            ActivityInfo info = activityInfos.get(position);
-            holder.icon.setImageDrawable(info.icon);
+            final ActivityInfo info = activityInfos.get(position);
+            if (info.iconLoadTask != null) {
+                info.iconLoadTask.cancel(true);
+                info .iconLoadTask = null;
+            }
+            if (info.icon != null) {
+                holder.icon.setImageDrawable(info.icon);
+            } else {
+                holder.icon.setImageDrawable(getResources().getDrawable(R.color.divider_gray));
+                info.iconLoadTask = new AsyncTask<Void, Void, Drawable>() {
+                    @Override
+                    protected Drawable doInBackground(@NonNull Void... params) {
+                        return info.resolveInfo.loadIcon(packageManager);
+                    }
+
+                    @Override
+                    protected void onPostExecute(@NonNull Drawable drawable) {
+                        info.icon = drawable;
+                        info.iconLoadTask = null;
+                        holder.icon.setImageDrawable(drawable);
+                    }
+                };
+                info.iconLoadTask.execute();
+            }
             holder.label.setText(info.label);
 
             return convertView;
